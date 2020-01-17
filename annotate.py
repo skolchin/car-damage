@@ -9,19 +9,18 @@
 # Licence:     MIT
 #-------------------------------------------------------------------------------
 
-import sys
 import cv2
 import numpy as np
 import tkinter as tk
 import json
 
-from collections import UserDict
 from pathlib import Path
 from imutils.perspective import four_point_transform
+from skimage.measure import compare_ssim, find_contours
+
 from tkinter import filedialog
 from tkinter import ttk
 
-sys.path.append('..\\gbr')
 from gr.ui_extra import ImagePanel, ImgButton, ImageMask, ImageTransform
 from gr.utils import get_image_area
 
@@ -165,40 +164,56 @@ class AnnotateApp(tk.Tk):
         self.transform.show_coord = True
 
         # Preview selection
-        self.selectedArea = {}
-        self.previewImage = {}
-        area_frames = {}
+        self.selectedAreas = {}
+        self.previewImages = {}
+        self.diffImages = {}
 
-        def add_area(label):
-            area_frames[label] = tk.Frame(right_frame)
-            area_frames[label].pack(side = tk.LEFT, fill = tk.BOTH, expand = True)
+        def add_area(label, ncol):
+            area_frame = tk.Frame(right_frame)
+            area_frame.grid(column = ncol, row = 0, sticky = "nswe")
 
-            tk.Label(area_frames[label], text = label.title() + " image area").pack(
-                side = tk.TOP, fill = tk.Y, pady = 5, padx = 5)
-            self.selectedArea[label] = ImagePanel(area_frames[label],
+            tk.Label(area_frame, text = label.title() + " image").pack(
+                side = tk.TOP, fill = tk.Y, pady = 2, padx = 2)
+            self.selectedAreas[label] = ImagePanel(area_frame,
                 image = self.def_img,
                 mode = "fit",
                 max_size = 200,
                 bd=1, relief=tk.GROOVE,
                 frame_callback = self.preview_callback)
-            self.selectedArea[label].pack(side = tk.TOP, fill = tk.BOTH, expand = True,
-                padx = 5, pady = 5)
+            self.selectedAreas[label].pack(side = tk.TOP, fill = tk.BOTH, expand = True,
+                padx = 2, pady = 2)
 
-            tk.Label(area_frames[label], text = label.title() + " area preview").pack(
-                side = tk.TOP, fill = tk.Y, pady = 5, padx = 5)
-            self.previewImage[label] = ImagePanel(area_frames[label],
+            area_frame = tk.Frame(right_frame)
+            area_frame.grid(column = ncol, row = 1, sticky = "nswe")
+
+            tk.Label(area_frame, text = label.title() + " image normalized").pack(
+                side = tk.TOP, fill = tk.Y, pady = 2, padx = 2)
+            self.previewImages[label] = ImagePanel(area_frame,
                 image = cv2.imread("ui\\def_image.png"),
                 mode = "fit",
                 max_size = 200,
                 bd=1, relief=tk.GROOVE,
                 frame_callback = self.preview_callback)
-            self.previewImage[label].pack(side = tk.TOP, fill = tk.BOTH, expand = True,
-                padx = 5, pady = 5)
+            self.previewImages[label].pack(side = tk.TOP, fill = tk.BOTH, expand = True,
+                padx = 2, pady = 2)
 
+        add_area('left', 0)
+        add_area('right', 1)
 
-        add_area('left')
-        add_area('right')
+        area_frame = tk.Frame(right_frame)
+        area_frame.grid(columnspan = 2, row = 2, sticky = "nswe")
 
+        self.diffScore = tk.Label(area_frame, text = "Images similarity score")
+        self.diffScore.pack(side = tk.TOP, fill = tk.Y, pady = 2, padx = 2)
+
+        self.diffResult = ImagePanel(area_frame,
+            image = cv2.imread("ui\\def_image.png"),
+            mode = "fit",
+            max_size = 200,
+            bd=1, relief=tk.GROOVE,
+            frame_callback = self.preview_callback)
+        self.diffResult.pack(side = tk.TOP, fill = tk.BOTH, expand = True,
+            padx = 2, pady = 2)
 
     def open_image_callback(self, event):
         fn = filedialog.askopenfilename(title = "Select file",
@@ -246,6 +261,8 @@ class AnnotateApp(tk.Tk):
         self.areaButton.state = False
         if img is not None:
             label = self.set_preview(img, transform.bounding_rect)
+            self.set_diff()
+
             self.meta_data[self.image_data.key][label] = transform.scaled_rect
             self.meta_data.save()
 
@@ -285,6 +302,8 @@ class AnnotateApp(tk.Tk):
         else:
             self.clear_preview('right')
 
+        self.set_diff()
+
         self.title('Annotate cars - ' + str(file_name))
 
     def change_file(self, direction):
@@ -317,16 +336,72 @@ class AnnotateApp(tk.Tk):
         m = [min_x, min_y, max_x, max_y]
 
         label = 'left' if max_x <= self.imageSplit.scaled_mask[2] else 'right'
-        self.previewImage[label].image = img
+        self.previewImages[label].image = img
 
         area_img = get_image_area(self.image_data.image, m)
-        self.selectedArea[label].image = area_img
+        self.selectedAreas[label].image = area_img
 
         return label
 
     def clear_preview(self, label):
-        self.previewImage[label].image = self.def_img
-        self.selectedArea[label].image = self.def_img
+        self.previewImages[label].image = self.def_img
+        self.selectedAreas[label].image = self.def_img
+        self.diffImages[label].image = self.def_img
+
+    def set_diff(self):
+        def clean_up():
+            self.diffScore.configure(text = "Images similarity score")
+            self.diffResult.image = self.def_img
+
+        if self.image_data is None:
+            clean_up()
+            return False
+
+        meta = self.meta_data[self.image_data.key]
+        for k in ['split', 'left', 'right']:
+            if not k in meta:
+                clean_up()
+                return False
+
+        score, diff = self.get_diff(self.image_data.image, meta)
+        self.diffScore.configure(text = "Images similarity score: {}%".format(np.round(score*100, 2)))
+        self.diffResult.image = diff
+
+        return True
+
+    def get_diff(self, img, meta):
+        split = meta['split']
+
+        parts = {}
+        parts['left'] = get_image_area(img, [0, 0, split, img.shape[0]])
+        parts['right'] = get_image_area(img, [split, 0, img.shape[1], img.shape[0]])
+
+        tr = {}
+        patches = {}
+        grays = {}
+        for k in parts:
+            tr[k] = np.array(meta[k])
+            patches[k] = four_point_transform(img, tr[k])
+
+        new_size = (
+            max([x.shape[1] for x in patches.values()]),
+            max([x.shape[0] for x in patches.values()])
+        )
+
+        for k in patches:
+            patches[k] = cv2.resize(patches[k], dsize = new_size, interpolation = cv2.INTER_CUBIC)
+            grays[k] = cv2.cvtColor(patches[k], cv2.COLOR_BGR2GRAY)
+
+        (score, diff) = compare_ssim(grays['left'], grays['right'], full=True, gaussian_weights=True)
+        contours = find_contours(diff, level=0.5, fully_connected="low", positive_orientation="low")
+
+        diff_img = patches['left'].copy()  #np.zeros((diff.shape[0], diff.shape[1], 3), "uint8")
+        for n, contour in enumerate(contours):
+            for x, y in contour:
+                diff_img[int(x), int(y)] = [0, 0, 255]
+
+        diff = (diff * 255).astype("uint8")
+        return score, diff_img
 
 # Main function
 def main():
