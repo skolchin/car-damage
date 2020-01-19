@@ -149,26 +149,24 @@ class AnnotateApp(tk.Tk):
         self.imageSplit.mask_color = 'green'
         self.imageSplit.mask_width = 1
 
-        # Area
-##        self.areaMask = ImageMask(self.imagePanel,
-##            allow_change = True,
-##            show_mask = False,
-##            mode = 'area',
-##            mask_callback = self.area_mask_callback)
-
-        # Transform
+        # Common transformer
         self.transform = ImageTransform(
             self.imagePanel,
             inplace = False,
+            show_coord = False,
+            keep = False,
+            connect = True,
+            allow_change = False,
             callback = self.transform_callback)
-        self.transform.show_coord = True
 
-        # Preview selection
+        # Panels to preview selection and area transformer objects
         self.selectedAreas = {}
         self.previewImages = {}
+        self.transforms = {}
         self.diffImages = {}
 
         def add_area(label, ncol):
+            # Preview selection (non-transformed)
             area_frame = tk.Frame(right_frame)
             area_frame.grid(column = ncol, row = 0, sticky = "nswe")
 
@@ -183,6 +181,7 @@ class AnnotateApp(tk.Tk):
             self.selectedAreas[label].pack(side = tk.TOP, fill = tk.BOTH, expand = True,
                 padx = 2, pady = 2)
 
+            # Transformed selection
             area_frame = tk.Frame(right_frame)
             area_frame.grid(column = ncol, row = 1, sticky = "nswe")
 
@@ -196,6 +195,16 @@ class AnnotateApp(tk.Tk):
                 frame_callback = self.preview_callback)
             self.previewImages[label].pack(side = tk.TOP, fill = tk.BOTH, expand = True,
                 padx = 2, pady = 2)
+
+            # Transformers
+            self.transforms[label] = ImageTransform(
+                self.imagePanel,
+                inplace = False,
+                show_coord = False,
+                keep = True,
+                connect = True,
+                allow_change = True,
+                callback = self.transform_callback)
 
         add_area('left', 0)
         add_area('right', 1)
@@ -249,9 +258,18 @@ class AnnotateApp(tk.Tk):
             return
 
         if event.state:
-            self.transform.start()
+            has_rect = 0
+            for t in self.transforms.values():
+                if t.transform_rect is not None:
+                    t.show()
+                    has_rect += 1
+            if has_rect < len(self.transforms):
+                self.transform.start()
         else:
-            self.transform.cancel()
+            if self.transform.started:
+                self.transform.cancel()
+            for t in self.transforms.values():
+                t.hide()
 
     def split_mask_callback(self, mask):
         self.meta_data[self.image_data.key]['split'] = mask.scaled_mask[2]
@@ -262,6 +280,10 @@ class AnnotateApp(tk.Tk):
         if img is not None:
             label = self.set_preview(img, transform.bounding_rect)
             self.set_diff()
+
+            if transform.tag != self.transforms[label].tag:
+                self.transforms[label].scaled_rect = transform.bounding_rect
+                self.transforms[label].show()
 
             self.meta_data[self.image_data.key][label] = transform.scaled_rect
             self.meta_data.save()
@@ -290,20 +312,14 @@ class AnnotateApp(tk.Tk):
             m = [x, 0, x, self.imageSplit.scaled_mask[3]]
             self.imageSplit.scaled_mask = m
 
-        if 'left' in meta:
-            self.transform.scaled_rect = meta['left']
-            self.set_preview(self.transform.transform_image, self.transform.bounding_rect)
-        else:
-            self.clear_preview('left')
-
-        if 'right' in meta:
-            self.transform.scaled_rect = meta['right']
-            self.set_preview(self.transform.transform_image, self.transform.bounding_rect)
-        else:
-            self.clear_preview('right')
+        for k, t in self.transforms.items():
+            if not k in meta:
+                self.clear_preview(k)
+            else:
+                t.scaled_rect = meta[k]
+                self.set_preview(t.transform_image, t.bounding_rect)
 
         self.set_diff()
-
         self.title('Annotate cars - ' + str(file_name))
 
     def change_file(self, direction):
@@ -347,6 +363,8 @@ class AnnotateApp(tk.Tk):
         self.previewImages[label].image = self.def_img
         self.selectedAreas[label].image = self.def_img
         self.diffImages[label].image = self.def_img
+        self.transforms[label].hide()
+        self.transforms[label].transform_rect = None
 
     def set_diff(self):
         def clean_up():
