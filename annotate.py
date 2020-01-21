@@ -15,14 +15,58 @@ import tkinter as tk
 import json
 
 from pathlib import Path
-from imutils.perspective import four_point_transform
+from imutils.perspective import order_points, four_point_transform
 from skimage.measure import compare_ssim, find_contours
+from copy import deepcopy
 
 from tkinter import filedialog
 from tkinter import ttk
 
-from gr.ui_extra import ImagePanel, ImgButton, ImageMask, ImageTransform
+from gr.ui_extra import ImagePanel, ImgButton, ImageMask, ImageTransform, ImgButtonGroup
 from gr.utils import get_image_area
+
+
+def inv_four_point_transform(image, pts):
+    # obtain a consistent order of the points and unpack them
+    # individually
+    rect = order_points(pts)
+    (tl, tr, br, bl) = rect
+
+    # compute the width of the new image, which will be the
+    # maximum distance between bottom-right and bottom-left
+    # x-coordiates or the top-right and top-left x-coordinates
+    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+    maxWidth = max(int(widthA), int(widthB))
+
+    # compute the height of the new image, which will be the
+    # maximum distance between the top-right and bottom-right
+    # y-coordinates or the top-left and bottom-left y-coordinates
+    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+    maxHeight = max(int(heightA), int(heightB))
+
+    # now that we have the dimensions of the new image, construct
+    # the set of destination points to obtain a "birds eye view",
+    # (i.e. top-down view) of the image, again specifying points
+    # in the top-left, top-right, bottom-right, and bottom-left
+    # order
+    dst = np.array([
+        [0, 0],
+        [maxWidth - 1, 0],
+        [maxWidth - 1, maxHeight - 1],
+        [0, maxHeight - 1]], dtype="float32")
+
+    # compute the perspective transform matrix and then apply it
+    M = cv2.getPerspectiveTransform(rect, dst)
+    invM = np.linalg.pinv(M)
+
+    #warped = cv2.warpPerspective(image, invM, (maxWidth, maxHeight))
+    warped = cv2.warpPerspective(image, invM, (image.shape[1], image.shape[0]))
+
+    # return the warped image
+    return warped
+
 
 class ImageData:
     def __init__(self, file_name = None):
@@ -70,6 +114,12 @@ class MetaData(dict):
             json.dump(self, f, indent=4, sort_keys=True, ensure_ascii=False)
             f.close()
 
+    def clear(self, img_data):
+        if self.get(img_data.key):
+            meta = {'file_name': img_data.file_name}
+            self.__setitem__(img_data.key, meta)
+        return meta
+
 
 class AnnotateApp(tk.Tk):
     # Constructor
@@ -110,16 +160,23 @@ class AnnotateApp(tk.Tk):
             tag = "next", tooltip = "Next image",
             command = self.next_image_callback).pack(side = tk.LEFT, padx = 2, pady = 2)
 
-        self.splitButton = ImgButton(self.toolbarPanel,
+        ImgButton(self.toolbarPanel,
             tag = "split", tooltip = "Split image",
-            command = self.split_image_callback)
-        self.splitButton.pack(side = tk.LEFT, padx = 2, pady = 2)
+            command = self.split_image_callback).pack(side = tk.LEFT, padx = 2, pady = 2)
 
-        self.areaButton = ImgButton(self.toolbarPanel,
+        ImgButton(self.toolbarPanel,
             tag = "area", tooltip = "Select damage area",
-            command = self.transform_start_callback)
-        self.areaButton.pack(side = tk.LEFT, padx = 2, pady = 2)
+            command = self.transform_start_callback).pack(side = tk.LEFT, padx = 2, pady = 2)
 
+        ImgButton(self.toolbarPanel,
+            tag = "reset", tooltip = "Reset areas",
+            command = self.reset_callback).pack(side = tk.LEFT, padx = 2, pady = 2)
+
+
+        self.bg = ImgButtonGroup(self.toolbarPanel)
+        self.bg.add_group('has_file', ['split', 'area', 'reset'])
+        self.bg.add_group('transform', ['split', 'area'], ImgButtonGroup.BG_DEPENDENT)
+        self.bg['has_file'].disabled = True
 
     def __init_statusbar(self):
         pass
@@ -163,7 +220,6 @@ class AnnotateApp(tk.Tk):
         self.selectedAreas = {}
         self.previewImages = {}
         self.transforms = {}
-        self.diffImages = {}
 
         def add_area(label, ncol):
             # Preview selection (non-transformed)
@@ -209,20 +265,41 @@ class AnnotateApp(tk.Tk):
         add_area('left', 0)
         add_area('right', 1)
 
+        # Differences
         area_frame = tk.Frame(right_frame)
         area_frame.grid(columnspan = 2, row = 2, sticky = "nswe")
 
         self.diffScore = tk.Label(area_frame, text = "Images similarity score")
         self.diffScore.pack(side = tk.TOP, fill = tk.Y, pady = 2, padx = 2)
 
+        # Diff between transformed images
+        self.diffArea = ImagePanel(area_frame,
+            image = cv2.imread("ui\\def_image.png"),
+            mode = "fit",
+            max_size = 200,
+            bd=1, relief=tk.GROOVE,
+            frame_callback = self.preview_callback)
+        self.diffArea.pack(side = tk.LEFT, fill = tk.BOTH, expand = True,
+            padx = 2, pady = 2)
+
+        # Diff applied to damaged image
         self.diffResult = ImagePanel(area_frame,
             image = cv2.imread("ui\\def_image.png"),
             mode = "fit",
             max_size = 200,
             bd=1, relief=tk.GROOVE,
             frame_callback = self.preview_callback)
-        self.diffResult.pack(side = tk.TOP, fill = tk.BOTH, expand = True,
+        self.diffResult.pack(side = tk.LEFT, fill = tk.BOTH, expand = True,
             padx = 2, pady = 2)
+
+
+    @property
+    def buttons(self):
+        r = {}
+        for w in self.toolbarPanel.winfo_children():
+            if isinstance(w, ImgButton):
+                r[w.tag] = w
+        return r
 
     def open_image_callback(self, event):
         fn = filedialog.askopenfilename(title = "Select file",
@@ -271,21 +348,40 @@ class AnnotateApp(tk.Tk):
             for t in self.transforms.values():
                 t.hide()
 
+    def reset_callback(self, event):
+        event.cancel = True
+        if self.image_data is None: return
+
+        self.buttons['split'].release()
+        self.buttons['area'].release()
+
+        self.imageSplit.default_mask()
+        self.transform.transform_rect = None
+
+        for k, t in self.transforms.items():
+            self.clear_preview(k)
+
+        self.diffScore.configure(text = "Images similarity score")
+        self.diffArea.image = self.def_img
+
+        self.meta_data.clear(self.image_data)
+        self.meta_data.save()
+
     def split_mask_callback(self, mask):
         self.meta_data[self.image_data.key]['split'] = mask.scaled_mask[2]
         self.meta_data.save()
 
     def transform_callback(self, transform, img):
-        self.areaButton.state = False
+        self.buttons['area'].state = False
         if img is not None:
             label = self.set_preview(img, transform.bounding_rect)
+            self.meta_data[self.image_data.key][label] = transform.scaled_rect
             self.set_diff()
 
             if transform.tag != self.transforms[label].tag:
-                self.transforms[label].scaled_rect = transform.bounding_rect
+                self.transforms[label].scaled_rect = transform.scaled_rect
                 self.transforms[label].show()
 
-            self.meta_data[self.image_data.key][label] = transform.scaled_rect
             self.meta_data.save()
 
     def preview_callback(self, event):
@@ -298,8 +394,7 @@ class AnnotateApp(tk.Tk):
         cv2.imshow('Preview', get_panel(event.widget).src_image)
 
     def load_image(self, file_name):
-        self.splitButton.release()
-        self.areaButton.release()
+        self.bg['has_file'].release()
 
         self.image_data = ImageData(str(file_name))
         meta = self.meta_data.add(self.image_data)
@@ -321,6 +416,7 @@ class AnnotateApp(tk.Tk):
 
         self.set_diff()
         self.title('Annotate cars - ' + str(file_name))
+        self.bg['has_file'].disabled = False
 
     def change_file(self, direction):
         path = Path(__file__).parent.joinpath(self.meta_data.IMG_DIR)
@@ -362,13 +458,13 @@ class AnnotateApp(tk.Tk):
     def clear_preview(self, label):
         self.previewImages[label].image = self.def_img
         self.selectedAreas[label].image = self.def_img
-        self.diffImages[label].image = self.def_img
         self.transforms[label].hide()
         self.transforms[label].transform_rect = None
 
     def set_diff(self):
         def clean_up():
             self.diffScore.configure(text = "Images similarity score")
+            self.diffArea.image = self.def_img
             self.diffResult.image = self.def_img
 
         if self.image_data is None:
@@ -381,45 +477,85 @@ class AnnotateApp(tk.Tk):
                 clean_up()
                 return False
 
-        score, diff = self.get_diff(self.image_data.image, meta)
+        score, diff, result = self.get_diff(self.image_data.image, meta)
         self.diffScore.configure(text = "Images similarity score: {}%".format(np.round(score*100, 2)))
-        self.diffResult.image = diff
+        self.diffArea.image = diff
+        self.diffResult.image = result
 
         return True
 
     def get_diff(self, img, meta):
+        # Get image areas
         split = meta['split']
-
         parts = {}
         parts['left'] = get_image_area(img, [0, 0, split, img.shape[0]])
         parts['right'] = get_image_area(img, [split, 0, img.shape[1], img.shape[0]])
 
+        # Transform areas to patches according to specified transform rect
         tr = {}
         patches = {}
-        grays = {}
         for k in parts:
             tr[k] = np.array(meta[k])
             patches[k] = four_point_transform(img, tr[k])
 
+        # Find out maximum size of a patch
         new_size = (
-            max([x.shape[1] for x in patches.values()]),
-            max([x.shape[0] for x in patches.values()])
+            max([x.shape[0] for x in patches.values()]),
+            max([x.shape[1] for x in patches.values()])
         )
 
+        # Resize patches to common size and make grays
+        patches_resized = {}
+        grays = {}
         for k in patches:
-            patches[k] = cv2.resize(patches[k], dsize = new_size, interpolation = cv2.INTER_CUBIC)
-            grays[k] = cv2.cvtColor(patches[k], cv2.COLOR_BGR2GRAY)
+            patches_resized[k] = cv2.resize(patches[k], dsize = new_size, interpolation = cv2.INTER_CUBIC)
+            grays[k] = cv2.cvtColor(patches_resized[k], cv2.COLOR_BGR2GRAY)
 
+        # Calculate scrore and difference
         (score, diff) = compare_ssim(grays['left'], grays['right'], full=True, gaussian_weights=True)
+
+        # Find contours and apply them to left patch
+        # Also, fill a difference binary mask
         contours = find_contours(diff, level=0.5, fully_connected="low", positive_orientation="low")
+        diff_img = patches_resized['left'].copy()
+        diff_mask = np.zeros((diff_img.shape[:2]), "uint8")
 
-        diff_img = patches['left'].copy()  #np.zeros((diff.shape[0], diff.shape[1], 3), "uint8")
         for n, contour in enumerate(contours):
-            for x, y in contour:
-                diff_img[int(x), int(y)] = [0, 0, 255]
+            for y, x in contour:
+                # For patch simply mark contour points as red
+                diff_img[int(y), int(x)] = [0, 0, 255]
+                diff_mask[int(y), int(x)] = 255
 
-        diff = (diff * 255).astype("uint8")
-        return score, diff_img
+        # Upsize difference mask to original patch size
+        diff_mask_resized = cv2.resize(diff_mask,
+                                       dsize = (patches['left'].shape[1], patches['left'].shape[0]),
+                                       interpolation = cv2.INTER_CUBIC)
+
+        # Undo 4 point transformation
+        # top-left corner of original transform rect is a key point on target image
+        rect = deepcopy(tr['left'])
+        tl = order_points(tr['left'])[0]
+        for r in rect:
+            r[0] -= tl[0]
+            r[1] -= tl[1]
+
+        diff_mask_tr = inv_four_point_transform(diff_mask_resized, rect)
+
+        # Transform diff mask to patch of the same size as left image area
+        result_img = parts['left']
+
+        result_patch = np.zeros(result_img.shape[:2], dtype = result_img.dtype)
+        dy, dx = diff_mask_tr.shape
+        dx += tl[0]
+        dy += tl[1]
+
+        result_patch[int(tl[1]):int(dy), int(tl[0]):int(dx)] = diff_mask_tr
+
+        # Apply patch to left image area
+        idx = (result_patch != 0)
+        result_img[idx] = (0, 0, 255)
+
+        return score, diff_img, result_img
 
 # Main function
 def main():

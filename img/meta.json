@@ -1,43 +1,43 @@
 {
     "photo_001.jpg": {
-        "file_name": "C:/Users/kol/Documents/kol/car-damage/img/photo_001.jpg",
+        "file_name": "C:\\Users\\kol\\Documents\\kol\\car-damage\\img\\photo_001.jpg",
         "left": [
             [
-                55,
-                154
+                65,
+                167
             ],
             [
-                262,
-                75
+                226,
+                92
             ],
             [
-                339,
-                208
+                327,
+                201
             ],
             [
-                159,
-                303
+                175,
+                290
             ]
         ],
         "right": [
             [
-                502,
-                150
+                509,
+                164
             ],
             [
-                699,
-                99
+                667,
+                102
             ],
             [
-                759,
-                226
+                745,
+                216
             ],
             [
-                582,
-                280
+                587,
+                260
             ]
         ],
-        "split": 448
+        "split": 449
     },
     "photo_002.jpg": {
         "file_name": "C:\\Users\\kol\\Documents\\kol\\car-damage\\img\\photo_002.jpg",
@@ -83,37 +83,37 @@
         "file_name": "C:\\Users\\kol\\Documents\\kol\\car-damage\\img\\photo_003.jpg",
         "left": [
             [
-                98,
-                68
+                100,
+                69
             ],
             [
-                61,
-                362
+                63,
+                363
             ],
             [
-                357,
-                512
+                360,
+                494
             ],
             [
-                390,
-                108
+                392,
+                109
             ]
         ],
         "right": [
             [
-                775,
-                92
+                734,
+                401
             ],
             [
-                721,
-                384
+                777,
+                82
             ],
             [
-                986,
-                112
+                1028,
+                111
             ],
             [
-                988,
+                997,
                 518
             ]
         ],
