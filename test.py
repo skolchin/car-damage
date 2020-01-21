@@ -1,19 +1,17 @@
 #-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
+# Name:        Testing script
+# Purpose:     Car damage analysis project
 #
 # Author:      kol
 #
 # Created:     17.01.2020
 # Copyright:   (c) kol 2020
-# Licence:     <your licence>
+# Licence:     MIT
 #-------------------------------------------------------------------------------
 
 import cv2
 import numpy as np
-import tkinter as tk
 import json
-import sys
 
 from img_utils import *
 
