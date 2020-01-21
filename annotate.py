@@ -17,67 +17,16 @@ import json
 from pathlib import Path
 from imutils.perspective import order_points
 from skimage.measure import compare_ssim, find_contours
+from skimage.draw import polygon
 from copy import deepcopy
 
 from tkinter import filedialog
 from tkinter import ttk
 
 from gr.ui_extra import ImagePanel, ImgButton, ImageMask, ImageTransform, ImgButtonGroup
-from gr.utils import get_image_area, show
+from gr.utils import get_image_area
 
-# Modified version of imutils.four_point_transform()
-# author:    Adrian Rosebrock
-# website:   http://www.pyimagesearch.com
-def four_point_transform(image, pts, inverse=False):
-    # obtain a consistent order of the points and unpack them
-    # individually
-    rect = order_points(pts)
-
-    d = np.min(rect)
-    if d >= 0:
-        (tl, tr, br, bl) = rect
-    else:
-        # Correct all rectangle points to be greater than or equal to 0
-        corrected_rect = deepcopy(rect)
-        d = abs(d)
-        for r in corrected_rect:
-            r[0] += d
-            r[1] += d
-        (tl, tr, br, bl) = corrected_rect
-
-    # compute the width of the new image, which will be the
-    # maximum distance between bottom-right and bottom-left
-    # x-coordiates or the top-right and top-left x-coordinates
-    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
-    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
-    maxWidth = max(int(widthA), int(widthB))
-
-    # compute the height of the new image, which will be the
-    # maximum distance between the top-right and bottom-right
-    # y-coordinates or the top-left and bottom-left y-coordinates
-    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
-    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
-    maxHeight = max(int(heightA), int(heightB))
-
-    # now that we have the dimensions of the new image, construct
-    # the set of destination points to obtain a "birds eye view",
-    # (i.e. top-down view) of the image, again specifying points
-    # in the top-left, top-right, bottom-right, and bottom-left
-    # order
-    dst = np.array([
-        [0, 0],
-        [maxWidth - 1, 0],
-        [maxWidth - 1, maxHeight - 1],
-        [0, maxHeight - 1]], dtype="float32")
-
-    # compute the perspective transform matrix and then apply it
-    M = cv2.getPerspectiveTransform(rect, dst)
-    if inverse:
-        M = np.linalg.pinv(M)
-    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
-
-    # return the warped image
-    return warped
+from img_utils import *
 
 
 class ImageData:
@@ -304,6 +253,16 @@ class AnnotateApp(tk.Tk):
         self.diffResult.pack(side = tk.LEFT, fill = tk.BOTH, expand = True,
             padx = 2, pady = 2)
 
+        area_frame = tk.Frame(right_frame)
+        area_frame.grid(columnspan = 2, row = 3, sticky = "nswe")
+
+        self.varFilter = tk.IntVar()
+        self.varFilter.set(0)
+        ttk.Checkbutton(area_frame, text="Filter",
+                        variable=self.varFilter,
+                        command=self.apply_filter_changed).pack(side = tk.LEFT,
+                        padx = 2, pady = 5)
+
 
     @property
     def buttons(self):
@@ -405,6 +364,20 @@ class AnnotateApp(tk.Tk):
 
         cv2.imshow('Preview', get_panel(event.widget).src_image)
 
+    def apply_filter_changed(self):
+        if self.image_data is None:
+            return
+
+        meta = self.meta_data[self.image_data.key]
+        for t in self.transforms.values():
+            self.set_preview(t.transform_image, t.bounding_rect)
+
+        self.set_diff()
+
+        apply_filter = self.varFilter.get() > 0
+        self.meta_data[self.image_data.key]['filter'] = apply_filter
+        self.meta_data.save()
+
     def load_image(self, file_name):
         self.bg['has_file'].release()
 
@@ -418,6 +391,11 @@ class AnnotateApp(tk.Tk):
             x = meta['split']
             m = [x, 0, x, self.imageSplit.scaled_mask[3]]
             self.imageSplit.scaled_mask = m
+
+        apply_filter = False
+        if 'filter' in meta:
+            apply_filter = self.meta_data[self.image_data.key]['filter']
+        self.varFilter.set(apply_filter)
 
         for k, t in self.transforms.items():
             if not k in meta:
@@ -489,92 +467,13 @@ class AnnotateApp(tk.Tk):
                 clean_up()
                 return False
 
-        score, diff, result = self.get_diff(self.image_data.image, meta)
+        apply_filter = self.varFilter.get() > 0
+        score, diff, result = get_diff(self.image_data.image, meta, apply_filter=apply_filter)
         self.diffScore.configure(text = "Images similarity score: {}%".format(np.round(score*100, 2)))
         self.diffArea.image = diff
         self.diffResult.image = result
 
         return True
-
-    def get_diff(self, img, meta):
-        # Get image areas
-        split = meta['split']
-        parts = {}
-        parts['left'] = get_image_area(img, [0, 0, split, img.shape[0]])
-        parts['right'] = get_image_area(img, [split, 0, img.shape[1], img.shape[0]])
-
-        # Transform areas to patches according to specified transform rect
-        tr = {}
-        patches = {}
-        for k in parts:
-            tr[k] = np.array(meta[k])
-            patches[k] = four_point_transform(img, tr[k])
-
-        # Find out maximum size of a patch
-        new_size = (
-            max([x.shape[1] for x in patches.values()]),
-            max([x.shape[0] for x in patches.values()])
-        )
-
-        # Resize patches to common size and make grays
-        patches_resized = {}
-        grays = {}
-        for k in patches:
-            patches_resized[k] = cv2.resize(patches[k], dsize = new_size, interpolation = cv2.INTER_CUBIC)
-            grays[k] = cv2.cvtColor(patches_resized[k], cv2.COLOR_BGR2GRAY)
-
-        # Calculate scrore and difference
-        (score, diff) = compare_ssim(grays['left'], grays['right'], full=True, gaussian_weights=True)
-
-        # Find contours and apply them to left patch
-        # Also, fill a difference binary mask
-        contours = find_contours(diff, level=0.5, fully_connected="low", positive_orientation="low")
-        diff_img = patches_resized['left'].copy()
-        diff_mask = np.zeros((diff_img.shape[:2]), "uint8")
-
-        for n, contour in enumerate(contours):
-            for y, x in contour:
-                # For patch simply mark contour points as red
-                diff_img[int(y), int(x)] = [0, 0, 255]
-                diff_mask[int(y), int(x)] = 255
-
-        #cv2.imshow('Diff img', diff_img)
-        #cv2.imshow('Diff mask', diff_mask)
-
-        # Resize difference mask to original patch size
-        diff_mask_resized = cv2.resize(diff_mask,
-                                       dsize=(patches['left'].shape[1], patches['left'].shape[0]),
-                                       interpolation=cv2.INTER_CUBIC)
-
-        #cv2.imshow('Patch', patches['left'])
-        #cv2.imshow('Diff mask resized', diff_mask_resized)
-
-        # Undo 4 point transformation
-        # Top-left corner of original transform rect is a key point on target image
-        rect = deepcopy(tr['left'])
-        tl = order_points(tr['left'])[0]
-        for r in rect:
-            r[0] -= tl[0]
-            r[1] -= tl[1]
-
-        diff_mask_tr = four_point_transform(diff_mask_resized, rect, inverse=True)
-        #cv2.imshow('Diff mask transformed', diff_mask_tr)
-
-        # Transform diff mask to patch of the same size as left image area
-        result_img = parts['left']
-
-        result_patch = np.zeros(result_img.shape[:2], dtype = result_img.dtype)
-        dy, dx = diff_mask_tr.shape
-        dx += tl[0]
-        dy += tl[1]
-
-        result_patch[int(tl[1]):int(dy), int(tl[0]):int(dx)] = diff_mask_tr
-
-        # Apply patch to left image area
-        idx = (result_patch != 0)
-        result_img[idx] = (0, 0, 255)
-
-        return score, diff_img, result_img
 
 # Main function
 def main():
