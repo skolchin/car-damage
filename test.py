@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import tkinter as tk
 import json
+import sys
 
 from img_utils import *
 
@@ -32,7 +33,7 @@ img = cv2.imread(IMG_DIR + FILE_NAME)
 
 score, diff_img, result_img = get_diff(img, meta[FILE_NAME],
                                        fill_contours=False,
-                                       align=True,
+                                       align=False,
                                        apply_clahe=False,
                                        apply_filter=False,
                                        debug = True)

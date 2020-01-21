@@ -23,7 +23,7 @@ from scipy.ndimage.filters import gaussian_filter
 
 from gr.utils import get_image_area
 
-# Modified version of imutils.four_point_transform()
+# Modified version of imutils.four_point_transform() function
 # author:    Adrian Rosebrock
 # website:   http://www.pyimagesearch.com
 def four_point_transform(image, pts, inverse=False):
@@ -99,6 +99,9 @@ def gauss_filter(img):
     t = (((w - 1)/2)-0.5)/s
     return gaussian_filter(img, sigma=s, truncate=t)
 
+# Align two images
+# Taken from https://www.learnopencv.com/image-alignment-ecc-in-opencv-c-python/
+# Author Satya Mallick
 def align_images(im1, im2, warp_mode=cv2.MOTION_TRANSLATION, debug=False):
     # Convert images to grayscale
     im1_gray = cv2.cvtColor(im1,cv2.COLOR_BGR2GRAY)
@@ -124,19 +127,22 @@ def align_images(im1, im2, warp_mode=cv2.MOTION_TRANSLATION, debug=False):
     termination_eps = 1e-10;
 
     # Define termination criteria
-    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, number_of_iterations,  termination_eps)
+    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, number_of_iterations, termination_eps)
 
     # Run the ECC algorithm. The results are stored in warp_matrix.
-    (cc, warp_matrix) = cv2.findTransformECC (im1_gray,im2_gray,warp_matrix, warp_mode, criteria)
-    print(cc)
+    (cc, warp_matrix) = cv2.findTransformECC(im1_gray, im2_gray, warp_matrix,
+                                             motionType=warp_mode,
+                                             criteria=criteria)
 
     try:
         if warp_mode == cv2.MOTION_HOMOGRAPHY :
             # Use warpPerspective for Homography
-            im2_aligned = cv2.warpPerspective (im2, warp_matrix, (sz[1],sz[0]), flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
+            im2_aligned = cv2.warpPerspective(im2, warp_matrix, (sz[1],sz[0]),
+                                               flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
         else :
             # Use warpAffine for Translation, Euclidean and Affine
-            im2_aligned = cv2.warpAffine(im2, warp_matrix, (sz[1],sz[0]), flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP);
+            im2_aligned = cv2.warpAffine(im2, warp_matrix, (sz[1],sz[0]),
+                                         flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
 
         if debug:
             cv2.imshow('Aligned image', im2_aligned)
