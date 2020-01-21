@@ -15,7 +15,7 @@ import tkinter as tk
 import json
 
 from pathlib import Path
-from imutils.perspective import order_points, four_point_transform
+from imutils.perspective import order_points
 from skimage.measure import compare_ssim, find_contours
 from copy import deepcopy
 
@@ -23,14 +23,27 @@ from tkinter import filedialog
 from tkinter import ttk
 
 from gr.ui_extra import ImagePanel, ImgButton, ImageMask, ImageTransform, ImgButtonGroup
-from gr.utils import get_image_area
+from gr.utils import get_image_area, show
 
-
-def inv_four_point_transform(image, pts):
+# Modified version of imutils.four_point_transform()
+# author:    Adrian Rosebrock
+# website:   http://www.pyimagesearch.com
+def four_point_transform(image, pts, inverse=False):
     # obtain a consistent order of the points and unpack them
     # individually
     rect = order_points(pts)
-    (tl, tr, br, bl) = rect
+
+    d = np.min(rect)
+    if d >= 0:
+        (tl, tr, br, bl) = rect
+    else:
+        # Correct all rectangle points to be greater than or equal to 0
+        corrected_rect = deepcopy(rect)
+        d = abs(d)
+        for r in corrected_rect:
+            r[0] += d
+            r[1] += d
+        (tl, tr, br, bl) = corrected_rect
 
     # compute the width of the new image, which will be the
     # maximum distance between bottom-right and bottom-left
@@ -59,10 +72,9 @@ def inv_four_point_transform(image, pts):
 
     # compute the perspective transform matrix and then apply it
     M = cv2.getPerspectiveTransform(rect, dst)
-    invM = np.linalg.pinv(M)
-
-    #warped = cv2.warpPerspective(image, invM, (maxWidth, maxHeight))
-    warped = cv2.warpPerspective(image, invM, (image.shape[1], image.shape[0]))
+    if inverse:
+        M = np.linalg.pinv(M)
+    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
 
     # return the warped image
     return warped
@@ -500,8 +512,8 @@ class AnnotateApp(tk.Tk):
 
         # Find out maximum size of a patch
         new_size = (
-            max([x.shape[0] for x in patches.values()]),
-            max([x.shape[1] for x in patches.values()])
+            max([x.shape[1] for x in patches.values()]),
+            max([x.shape[0] for x in patches.values()])
         )
 
         # Resize patches to common size and make grays
@@ -526,20 +538,27 @@ class AnnotateApp(tk.Tk):
                 diff_img[int(y), int(x)] = [0, 0, 255]
                 diff_mask[int(y), int(x)] = 255
 
-        # Upsize difference mask to original patch size
+        #cv2.imshow('Diff img', diff_img)
+        #cv2.imshow('Diff mask', diff_mask)
+
+        # Resize difference mask to original patch size
         diff_mask_resized = cv2.resize(diff_mask,
-                                       dsize = (patches['left'].shape[1], patches['left'].shape[0]),
-                                       interpolation = cv2.INTER_CUBIC)
+                                       dsize=(patches['left'].shape[1], patches['left'].shape[0]),
+                                       interpolation=cv2.INTER_CUBIC)
+
+        #cv2.imshow('Patch', patches['left'])
+        #cv2.imshow('Diff mask resized', diff_mask_resized)
 
         # Undo 4 point transformation
-        # top-left corner of original transform rect is a key point on target image
+        # Top-left corner of original transform rect is a key point on target image
         rect = deepcopy(tr['left'])
         tl = order_points(tr['left'])[0]
         for r in rect:
             r[0] -= tl[0]
             r[1] -= tl[1]
 
-        diff_mask_tr = inv_four_point_transform(diff_mask_resized, rect)
+        diff_mask_tr = four_point_transform(diff_mask_resized, rect, inverse=True)
+        #cv2.imshow('Diff mask transformed', diff_mask_tr)
 
         # Transform diff mask to patch of the same size as left image area
         result_img = parts['left']
