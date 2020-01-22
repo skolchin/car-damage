@@ -28,7 +28,6 @@ from gr.utils import get_image_area
 
 from img_utils import *
 
-
 class ImageData:
     def __init__(self, file_name = None):
         self.image = None
@@ -83,14 +82,21 @@ class MetaData(dict):
 
 
 class AnnotateApp(tk.Tk):
+    DF_TITLE = "Поиск повреждений"
+    DF_LABEL_CAPTIONS = {
+        'left': [ 'Поврежденная область', 'Развертка повреждения' ],
+        'right': [ 'Исходная область', 'Развертка исх.области' ],
+    }
+    DF_SCORE_CAPTION = "Оценка степени повреждения"
+
     # Constructor
     def __init__(self, *args, **kwargs):
-        tk.Tk.__init__(self, "Annotate")
+        tk.Tk.__init__(self, self.DF_TITLE)
 
         self.image_data = None
         self.meta_data = MetaData()
 
-        self.title("Annotate cars")
+        self.title(self.DF_TITLE)
         self.minsize(300, 400)
 
         self.internalFrame = tk.Frame(self)
@@ -132,7 +138,6 @@ class AnnotateApp(tk.Tk):
         ImgButton(self.toolbarPanel,
             tag = "reset", tooltip = "Reset areas",
             command = self.reset_callback).pack(side = tk.LEFT, padx = 2, pady = 2)
-
 
         self.bg = ImgButtonGroup(self.toolbarPanel)
         self.bg.add_group('has_file', ['split', 'area', 'reset'])
@@ -187,7 +192,7 @@ class AnnotateApp(tk.Tk):
             area_frame = tk.Frame(right_frame)
             area_frame.grid(column = ncol, row = 0, sticky = "nswe")
 
-            tk.Label(area_frame, text = label.title() + " image").pack(
+            tk.Label(area_frame, text=self.DF_LABEL_CAPTIONS[label][0]).pack(
                 side = tk.TOP, fill = tk.Y, pady = 2, padx = 2)
             self.selectedAreas[label] = ImagePanel(area_frame,
                 image = self.def_img,
@@ -202,7 +207,7 @@ class AnnotateApp(tk.Tk):
             area_frame = tk.Frame(right_frame)
             area_frame.grid(column = ncol, row = 1, sticky = "nswe")
 
-            tk.Label(area_frame, text = label.title() + " image normalized").pack(
+            tk.Label(area_frame, text=self.DF_LABEL_CAPTIONS[label][1]).pack(
                 side = tk.TOP, fill = tk.Y, pady = 2, padx = 2)
             self.previewImages[label] = ImagePanel(area_frame,
                 image = cv2.imread("ui\\def_image.png"),
@@ -230,7 +235,7 @@ class AnnotateApp(tk.Tk):
         area_frame = tk.Frame(right_frame)
         area_frame.grid(columnspan = 2, row = 2, sticky = "nswe")
 
-        self.diffScore = tk.Label(area_frame, text = "Images similarity score")
+        self.diffScore = tk.Label(area_frame, text=self.DF_SCORE_CAPTION)
         self.diffScore.pack(side = tk.TOP, fill = tk.Y, pady = 2, padx = 2)
 
         # Diff between transformed images
@@ -258,7 +263,7 @@ class AnnotateApp(tk.Tk):
 
         self.varFilter = tk.IntVar()
         self.varFilter.set(0)
-        ttk.Checkbutton(area_frame, text="Filter",
+        ttk.Checkbutton(area_frame, text="Применить фильтр",
                         variable=self.varFilter,
                         command=self.apply_filter_changed).pack(side = tk.LEFT,
                         padx = 2, pady = 5)
@@ -346,13 +351,13 @@ class AnnotateApp(tk.Tk):
         self.buttons['area'].state = False
         if img is not None:
             label = self.set_preview(img, transform.bounding_rect)
-            self.meta_data[self.image_data.key][label] = transform.scaled_rect
-            self.set_diff()
 
+            self.set_diff()
             if transform.tag != self.transforms[label].tag:
                 self.transforms[label].scaled_rect = transform.scaled_rect
                 self.transforms[label].show()
 
+            self.meta_data[self.image_data.key][label] = transform.scaled_rect
             self.meta_data.save()
 
     def preview_callback(self, event):
@@ -405,7 +410,7 @@ class AnnotateApp(tk.Tk):
                 self.set_preview(t.transform_image, t.bounding_rect)
 
         self.set_diff()
-        self.title('Annotate cars - ' + str(file_name))
+        self.title('{} - {}'.format(self.DF_TITLE, file_name))
         self.bg['has_file'].disabled = False
 
     def change_file(self, direction):
@@ -453,7 +458,7 @@ class AnnotateApp(tk.Tk):
 
     def set_diff(self):
         def clean_up():
-            self.diffScore.configure(text = "Images similarity score")
+            self.diffScore.configure(text=self.DF_SCORE_CAPTION)
             self.diffArea.image = self.def_img
             self.diffResult.image = self.def_img
 
@@ -468,8 +473,13 @@ class AnnotateApp(tk.Tk):
                 return False
 
         apply_filter = self.varFilter.get() > 0
-        score, diff, result = get_diff(self.image_data.image, meta, apply_filter=apply_filter)
-        self.diffScore.configure(text = "Images similarity score: {}%".format(np.round(score*100, 2)))
+        score, diff, result = get_diff_meta(self.image_data.image, meta,
+            apply_filter=apply_filter,
+            fill_contours=True,
+            color="gradient",
+            gradient_colors=("blue", "green"))
+
+        self.diffScore.configure(text = "{}: {}%".format(self.DF_SCORE_CAPTION, np.round(score*100, 2)))
         self.diffArea.image = diff
         self.diffResult.image = result
 

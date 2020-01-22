@@ -17,7 +17,7 @@ from img_utils import *
 
 IMG_DIR = "img\\"
 META_FILE = "meta.json"
-FILE_NAME = "photo_001.jpg"
+FILE_NAME = "photo_004.jpg"
 
 with open(IMG_DIR + META_FILE) as f:
     meta = json.load(f)
@@ -29,16 +29,18 @@ img = cv2.imread(IMG_DIR + FILE_NAME)
 #result_img = align_images_meta(img, meta[FILE_NAME], warp_mode=cv2.MOTION_HOMOGRAPHY, debug=True)
 #cv2.imshow('Aligned image', result_img)
 
-score, diff_img, result_img = get_diff(img, meta[FILE_NAME],
-                                       fill_contours=False,
-                                       align=False,
-                                       apply_clahe=False,
-                                       apply_filter=False,
-                                       debug = True)
+score, patch_img, result_img = get_diff_meta(img, meta[FILE_NAME],
+                                            color="gradient",
+                                            fill_contours=True,
+                                            align=False,
+                                            apply_clahe=False,
+                                            apply_filter=False,
+                                            gradient_colors=("blue", "green"),
+                                            debug = True)
 print(score)
 
-cv2.imshow('Result diff img', diff_img)
-cv2.imshow('Result img', result_img)
+cv2.imshow('Result patch', patch_img)
+cv2.imshow('Result image', result_img)
 
 
 cv2.waitKey()

@@ -1,7 +1,7 @@
 {
     "photo_001.jpg": {
         "file_name": "C:\\Users\\kol\\Documents\\kol\\car-damage\\img\\photo_001.jpg",
-        "filter": true,
+        "filter": false,
         "left": [
             [
                 66,
@@ -44,38 +44,38 @@
         "file_name": "C:\\Users\\kol\\Documents\\kol\\car-damage\\img\\photo_002.jpg",
         "left": [
             [
-                131,
-                4
+                144,
+                71
             ],
             [
-                160,
-                498
+                168,
+                506
             ],
             [
-                377,
-                386
+                506,
+                334
             ],
             [
-                543,
-                0
+                548,
+                7
             ]
         ],
         "right": [
             [
-                765,
-                0
+                777,
+                79
             ],
             [
-                867,
-                449
+                820,
+                476
             ],
             [
-                1023,
-                366
+                1103,
+                316
             ],
             [
-                1095,
-                4
+                1106,
+                2
             ]
         ],
         "split": 635
@@ -124,20 +124,20 @@
         "file_name": "C:\\Users\\kol\\Documents\\kol\\car-damage\\img\\photo_004.jpg",
         "left": [
             [
-                53,
-                94
+                54,
+                95
             ],
             [
-                237,
-                58
+                238,
+                59
             ],
             [
-                385,
-                116
+                386,
+                117
             ],
             [
-                188,
-                189
+                211,
+                208
             ]
         ],
         "right": [
