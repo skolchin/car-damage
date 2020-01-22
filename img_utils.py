@@ -57,11 +57,29 @@ def color_to_cv_color(name):
 def ensure_numeric_color(color, gradients=None, max_colors=None):
     """Ensures color is numeric"""
     ret_color = None
-    if color == 'random':
+    if color is None:
+        raise ValueError("Color not specified")
+
+    if type(color) == list:
+        # List of colors
+        # Assume all items are of the same type
+        # Make up a list of required length
+        if len(color) == 0:
+            raise ValueError("Empty color list")
+
+        if max_colors is None:
+            ret_color = color
+        else:
+            ret_color = color * int(np.ceil(max_colors / len(color)))
+            ret_color = ret_color[0:max_colors]
+
+    elif color == 'random':
+        # Random color
         ret_color = random_colors(max_colors if max_colors is not None else 1)
         if max_colors is None:
             ret_color = ret_color[0]
     elif color == "gradient":
+        # Gradient color
         if gradients is None or max_colors is None:
             raise ValueError("Cannot determine gradient of a single color")
         else:
@@ -70,10 +88,12 @@ def ensure_numeric_color(color, gradients=None, max_colors=None):
             gc = (ensure_numeric_color(gradients[0]), ensure_numeric_color(gradients[1]))
             ret_color = gradient_colors(gc, max_colors)
     elif type(color) == str:
+        # Named color
         ret_color = color_to_cv_color(color)
         if max_colors is not None:
             ret_color = [ret_color]
     else:
+        # Should be a color
         ret_color = color
         if max_colors is not None:
             ret_color = [ret_color]
@@ -237,7 +257,9 @@ def get_diff(im1, im2, align=False, debug=False):
     return score, diff
 
 
-def draw_contour(contour_img, contour, color,
+def draw_contour(contour_img,
+                 contour,
+                 color,
                  gradient_colors=("red", "blue"),
                  min_size=10,
                  filled=True,
@@ -269,28 +291,28 @@ def draw_contour(contour_img, contour, color,
             mask = np.zeros((contour_img.shape[0], contour_img.shape[1]), dtype="uint8")
             mask[rr, cc] = True
 
-        if color != "random" and color != "gradient":
+        if color != "random" and color != "gradient" and type(color) != list:
             # If a solid color requested, fill the polygon
             color = ensure_numeric_color(color)
             contour_img[rr, cc] = color
         else:
+            # Gradient, random colors or list of colors
             # Define contour center
             M = measure.moments_coords(perimeter)
             centroid = (M[1, 0] / M[0, 0], M[0, 1] / M[0, 0])
             area_center = np.array([centroid])
 
-            # Determine distance of each point from the center
+            # Determine distance of each area point from the center
             D = distance.cdist(area, area_center, metric='euclidean')
 
             # Define colors
-            min_color = int(np.min(D))
-            num_colors = int(np.max(D) - min_color) + 1
+            num_colors = int(np.max(D)) + 1
             colours = ensure_numeric_color(color, gradient_colors, num_colors)
 
-            # Fill polygon by colors regarding distance of each pixel from center
+            # Fill polygon by colors specified by distance of each pixel from the center
             for n, p in enumerate(area):
                 d = int(D[n])
-                c = colours[d-min_color] if len(colours) > 1 else colours[0]
+                c = colours[d] if len(colours) > 1 else colours[0]
                 contour_img[p[0], p[1]] = c
 
     if compute_mask:
@@ -298,6 +320,28 @@ def draw_contour(contour_img, contour, color,
     else:
         return contour_img
 
+
+def get_max_contour_colors(contour, image_shape):
+    """Determine number of colors to fill a contour with gradient or random colors"""
+
+    # Determine contour perimeter
+    try:
+        rr, cc = draw.polygon_perimeter(contour[:, 0], contour[:, 1], shape=image_shape)
+        perimeter = np.column_stack((rr, cc))
+
+        M = measure.moments_coords(perimeter)
+        centroid = (M[1, 0] / M[0, 0], M[0, 1] / M[0, 0])
+        area_center = np.array([centroid])
+
+        # Determine distance of each point from the center
+        D = distance.cdist(perimeter, area_center, metric='euclidean')
+
+        # Get nunber of colors
+        num_colors = int(np.max(D)) + 1
+        return num_colors
+
+    except IndexError:
+        return None
 
 def get_parts(img, meta, apply_clahe=False, apply_filter=False, debug=False):
     """Internal function specific to cars-damage project"""

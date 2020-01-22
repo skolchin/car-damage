@@ -8,19 +8,92 @@ from img_utils import *
 ##from random import randint
 ##from matplotlib import colors
 
-FILE_NAME = "1.jpg"
+##FILE_NAME = "1.jpg"
+##
+##img = cv2.imread(FILE_NAME)
+##gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+##thresh = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY)[1]
+##contours = measure.find_contours(thresh, 0.8)
+##
+##contour_img = np.full(img.shape, (255, 255, 255), "uint8")
+##for c in contours:
+##    draw_contour(contour_img, c, "random", filled=True)
 
-img = cv2.imread(FILE_NAME)
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-thresh = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY)[1]
-contours = measure.find_contours(thresh, 0.8)
+cv2.namedWindow('Colors', cv2.WINDOW_AUTOSIZE)
 
-contour_img = np.full(img.shape, (255, 255, 255), "uint8")
-for c in contours:
-    draw_contour(contour_img, c, "gradient", filled=True)
+BAND_WIDTH = 5
+dir = "in"
+mode = "gradient"
 
-cv2.imshow('Contour', contour_img)
-cv2.waitKey()
+contour_img = np.zeros([300, 300, 3], "uint8")
+h, w = contour_img.shape[:2]
+contour = np.array([[0, 0], [h-1, 0], [h-1, w-1], [0, w-1]])
+
+num_colors = get_max_contour_colors(contour, contour_img.shape)
+num_colors = int(np.ceil(num_colors / BAND_WIDTH))
+
+grad_colors =  None
+n_grad_color = None
+
+def get_colors():
+    global grad_colors, n_grad_color
+
+    if mode == "random":
+        colors = random_colors(num_colors)
+        colors = list(np.repeat(colors, BAND_WIDTH, axis = 0))
+    else:
+        n = num_colors // 2
+        grad_colors =  list(gradient_colors(random_colors(2), n))
+        grad_colors.extend(reversed(grad_colors))
+        n_grad_color = len(grad_colors)-1
+        colors = list(np.repeat(grad_colors, BAND_WIDTH, axis = 0))
+
+    return colors
+
+def next_color():
+    global grad_colors, n_grad_color
+
+    if mode == "random":
+        new_color = random_colors(1)[0]
+    else:
+        new_color = grad_colors[n_grad_color]
+        n_grad_color += 1
+        if n_grad_color >= len(grad_colors):
+            n_grad_color = 0
+
+    return new_color
+
+colors = get_colors()
+
+def shift_colors():
+    global colors
+
+    new_color = next_color()
+    if dir == "in":
+        colors = colors[BAND_WIDTH:]
+        colors.extend([new_color] * BAND_WIDTH)
+    else:
+        new_color = [new_color] * BAND_WIDTH
+        new_color.extend(colors[0:(-1 * BAND_WIDTH)])
+        colors = new_color
+
+
+while(True):
+
+    draw_contour(contour_img, contour, colors, filled=True)
+    cv2.imshow('Colors', contour_img)
+
+    shift_colors()
+
+    key = cv2.waitKey(30) & 0xFF
+    if key == ord('q'):
+        break
+    elif key == ord(' ') or key == ord('d'):
+        dir = "in" if dir != "in" else "out"
+    elif key == ord('c'):
+        mode = "random" if mode != "random" else "gradient"
+        colors = get_colors()
+
 
 cv2.destroyAllWindows()
 
