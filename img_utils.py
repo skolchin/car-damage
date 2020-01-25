@@ -55,7 +55,28 @@ def color_to_cv_color(name):
     return cv_bgr
 
 def ensure_numeric_color(color, gradients=None, max_colors=None):
-    """Ensures color is numeric"""
+    """Ensures color is numeric and, if a vector requested, have specified length.
+    The function performs the following conversions:
+        if 'random' color name is specified, generates requred number of random colors,
+        if 'gradient' color name is speciefied, computes a gradient vector,
+        translates color from textual name ('red') to RGB value,
+        if a list is provided, performs checks on its elements and
+            guarantees it has required number of elements.
+    Parameters:
+        color       Either a color name, RGB value or special 'random' and 'gradient' strings
+                    Could also be a list of names or RGB values
+        gradients   Array-like of 2 colors to generate a gradient from.
+                    Requred if `color` == `gradient`
+        max_color   Requested number of colors (see return value).
+                    Required if `color` == `gradient` or `random`.
+    Returns:
+        If `color` is a name or RGB value, result will be a vector of
+        this color with `max_color` length or single value if `max_color` is None
+        If `color` is `random`, result will be a list of colors with `max_color` length
+        If `color` is `gradient`, result will be a list of colors for computed gradient
+        If `color` is list, result will be a list with `max_colors` or original length
+            with all elements converted as they are single values
+    """
     ret_color = None
     if color is None:
         raise ValueError("Color not specified")
@@ -264,18 +285,47 @@ def draw_contour(contour_img,
                  min_size=10,
                  filled=True,
                  compute_mask=False):
-    """ Draw a contour as optionally fill it in with solid, random or gradient colors"""
+    """ Draw a contour  as optionally fill it with color.
+
+    Parameters:
+        contour_img     An image to draw on
+        contour         A list of contour points as returned by cv2.findContour() or
+                        measure.find_contours()
+        color           A color to draw contour or fill in if `filled` == True
+                        Color could be RGB-numeric, color name ('red'), special
+                        'random` and 'gradient` names or a list of such values
+        gradient_colors A tuple or list to generate gradient if `color` == 'gradient'
+        min_size        Minimum number of points in a contour to draw it
+        filled          If True, contour fill be filled with specified color
+        compute_mask    if True, a boolean mask of contour area will be computed
+    Returns:
+        contour_img     An image
+        mask            Area mask or None if compute_mask is False
+    """
+    r = draw_contour_(contour_img, contour, color, gradient_colors, min_size, filled, compute_mask)
+    return r[:2]
+
+def draw_contour_(contour_img,
+                 contour,
+                 color,
+                 gradient_colors=("red", "blue"),
+                 min_size=10,
+                 filled=True,
+                 compute_mask=False):
+    """ Draw a contour  as optionally fill it with color.
+    Differs from draw_contour() in that in addition to contour_img and mask also
+    returns perimeter, area, contour center and distance of each pixel of area in a center"""
 
     # Determine contour perimeter
+    mask, perimeter, area, centroid, D = None, None, None, None, None
     try:
         rr, cc = draw.polygon_perimeter(contour[:, 0], contour[:, 1], shape=contour_img.shape)
         if max(rr.shape[0], cc.shape[0]) < min_size:
             return
         perimeter = np.column_stack((rr, cc))
     except IndexError:
-        return
+        return None, None
 
-    mask = None
     if not filled:
         # Contour not filled, draw it
         color = ensure_numeric_color(color)
@@ -292,11 +342,11 @@ def draw_contour(contour_img,
             mask[rr, cc] = True
 
         if color != "random" and color != "gradient" and type(color) != list:
-            # If a solid color requested, fill the polygon
+            # If a solid color provided, simply fill the polygon
             color = ensure_numeric_color(color)
             contour_img[rr, cc] = color
         else:
-            # Gradient, random colors or list of colors
+            # Gradient, random colors or list of colors specified
             # Define contour center
             M = measure.moments_coords(perimeter)
             centroid = (M[1, 0] / M[0, 0], M[0, 1] / M[0, 0])
@@ -316,9 +366,23 @@ def draw_contour(contour_img,
                 contour_img[p[0], p[1]] = c
 
     if compute_mask:
-        return contour_img, mask
+        return contour_img, mask, perimeter, area, centroid, D
     else:
-        return contour_img
+        return contour_img, None, perimeter, area, centroid, D
+
+def update_contour(contour_img, color, params, gradient_colors=("red", "blue")):
+    """Updates colors of previosly drawn contour.
+    `params` should be result of draw_contour_() call
+    """
+
+    contour_img, mask, perimeter, area, centroid, D = params
+    num_colors = int(np.max(D)) + 1
+    colours = ensure_numeric_color(color, gradient_colors, num_colors)
+
+    for n, p in enumerate(area):
+        d = int(D[n])
+        c = colours[d] if len(colours) > 1 else colours[0]
+        contour_img[p[0], p[1]] = c
 
 
 def get_max_contour_colors(contour, image_shape):
@@ -345,6 +409,7 @@ def get_max_contour_colors(contour, image_shape):
 
 def get_parts(img, meta, apply_clahe=False, apply_filter=False, debug=False):
     """Internal function specific to cars-damage project"""
+
     # Get image areas
     split = meta['split']
     parts = {}
@@ -384,7 +449,7 @@ def get_parts(img, meta, apply_clahe=False, apply_filter=False, debug=False):
     return parts, tr, patches, patches_resized
 
 def align_images_meta(img, meta, warp_mode=cv2.MOTION_TRANSLATION, debug=False):
-    """Align two images using parameters stored in meta"""
+    """Align two images using parameters stored in meta dictionary"""
     parts, tr, patches, patches_resized = get_parts(img, meta, debug=debug)
     return align_images(patches_resized['left'], patches_resized['right'], warp_mode, debug)
 
@@ -396,7 +461,7 @@ def get_diff_meta(img, meta,
                   apply_filter=False,
                   gradient_colors=("red", "blue"),
                   debug=False):
-    """Get difference of two images using parameters stored in meta"""
+    """Get difference of two images using parameters stored in meta dictionary"""
 
     # Get image parts
     parts, tr, patches, patches_resized = get_parts(img, meta,
@@ -423,7 +488,6 @@ def get_diff_meta(img, meta,
 
     contours = measure.find_contours(thresh, level=0.5, fully_connected="low", positive_orientation="low")
     for n, contour in enumerate(contours):
-##        print(n, contour.shape)
         mask = draw_contour(diff_img, contour, color,
                             gradient_colors=gradient_colors,
                             filled=fill_contours,
