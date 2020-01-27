@@ -67,8 +67,6 @@ class GradientColorIterator:
 
 class ContGradientColorIterator:
     def __init__(self, dir, num_bands, band_width=BAND_WIDTH):
-        #GradientColorIterator.__init__(self, dir, 1, num_bands * band_width)
-
         self.num_bands = 1
         self.band_width = num_bands * band_width
 
