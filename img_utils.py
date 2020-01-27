@@ -18,7 +18,7 @@ from skimage import measure
 from skimage import draw
 from copy import deepcopy
 from scipy.ndimage.filters import gaussian_filter
-from matplotlib import colors
+from matplotlib import colors as plt_colors
 from scipy.spatial import distance
 from random import randint
 
@@ -50,7 +50,7 @@ def gradient_colors(colors, n):
 
 def color_to_cv_color(name):
     """Convert color with given name to OpenCV color"""
-    mp_rgb = colors.to_rgb(name)
+    mp_rgb = plt_colors.to_rgb(name)
     cv_bgr = [c * 255 for c in reversed(mp_rgb)]
     return cv_bgr
 
