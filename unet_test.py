@@ -14,68 +14,33 @@
 import numpy as np
 import json
 import skimage.draw
-import skimage.transform
-import PIL.Image
+import tensorflow as tf
 
 from matplotlib import pyplot as plt
 from pathlib import Path
 
-import tensorflow as tf
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-
-MODEL_NAME = "u-net"
 BATCH_SIZE = 32
 EPOCHS = 20
+IMG_WIDTH = 128
+IMG_HEIGHT = 128
+MODEL_NAME = "u-net-" + str(IMG_WIDTH)
 
-# Dataset normalization
-# Source: https://www.tensorflow.org/tutorials/images/segmentation
-# Author: Tensorflow Authors
-def normalize(input_image, input_mask):
-  input_image = tf.cast(input_image, tf.float32) / 255.0
-  input_mask -= 1
-  return input_image, input_mask
-
-# Train dataset mapping function
-# Source: https://www.tensorflow.org/tutorials/images/segmentation
-# Author: Tensorflow Authors
-@tf.function
-def load_image_train(datapoint):
-  input_image = tf.image.resize(datapoint['image'], (128, 128))
-  input_mask = tf.image.resize(datapoint['segmentation_mask'], (128, 128))
-
-  if tf.random.uniform(()) > 0.5:
-    input_image = tf.image.flip_left_right(input_image)
-    input_mask = tf.image.flip_left_right(input_mask)
-
-  input_image, input_mask = normalize(input_image, input_mask)
-
-  return input_image, input_mask
-
-# Testing dataset mapping function
-# Source: https://www.tensorflow.org/tutorials/images/segmentation
-# Author: Tensorflow Authors
-def load_image_test(datapoint):
-  input_image = tf.image.resize(datapoint['image'], (128, 128))
-  input_mask = tf.image.resize(datapoint['segmentation_mask'], (128, 128))
-
-  input_image, input_mask = normalize(input_image, input_mask)
-
-  return input_image, input_mask
-
-# Display dataset sample
+# Display a sample image
 # Source: https://www.tensorflow.org/tutorials/images/segmentation
 # Author: Tensorflow Authors
 def display_image(display_list):
+    display_list = [x for x in display_list if x is not None]
+
     plt.figure(figsize=(8, 8))
     title = ['Input Image', 'True Mask', 'Predicted Mask']
     for n, x in enumerate(display_list):
         plt.subplot(1, len(display_list), n+1)
         plt.title(title[n])
-        if x is not None:
-            plt.imshow(tf.keras.preprocessing.image.array_to_img(x))
+        plt.imshow(tf.keras.preprocessing.image.array_to_img(x))
         plt.axis('off')
     plt.show()
 
+# Convert RGB color to RGBA
 def rgb_to_rgba(rgb):
     row, col, ch = rgb.shape
 
@@ -93,28 +58,29 @@ def rgb_to_rgba(rgb):
 
     return rgba
 
-def display_image_with_mask(display_list, scale=1):
-    plt.figure(figsize=(5, 5))
-    title = ['Input Image', 'True Mask', 'Predicted Mask']
+# Display image with mask overlayed
+def display_image_with_mask(display_list, title = None):
+    display_list = [x for x in display_list if x is not None]
+
+    plt.figure(figsize=(8, 8))
+    if title is not None:
+        plt.title(title)
 
     img = display_list[0]
     plt.subplot(1, len(display_list), 1)
-    plt.title(title[0])
 
     plt.imshow(img)
     plt.axis('off')
 
     for n, mask in enumerate(display_list[1:]):
-        if mask is not None:
-            plt.subplot(1, len(display_list), n+2)
-            plt.title(title[n+1])
+        plt.subplot(1, len(display_list), n+2)
 
-            #masked_img = img.numpy().copy()
-            masked_img = rgb_to_rgba(img.numpy() if hasattr(img, "numpy") else img)
-            idx = np.squeeze(mask) > 0
-            masked_img[idx] = [1.0, 0.0, 0.0, 0.5]
-            plt.imshow(masked_img)
+        masked_img = rgb_to_rgba(img.numpy() if hasattr(img, "numpy") else img)
+        idx = np.squeeze(mask) > 0
+        masked_img[idx, 0] += 0.3
+        masked_img[idx, 3] = 0.5
 
+        plt.imshow(masked_img)
         plt.axis('off')
 
     plt.show()
@@ -146,7 +112,7 @@ def display_history(history):
     plt.title('Training and Validation Loss')
     plt.show()
 
-# Convert prediction to mask and average probability
+# Convert prediction to mask
 # Source: https://www.tensorflow.org/tutorials/images/segmentation
 # Author: Tensorflow Authors
 def create_mask(pred_mask):
@@ -158,14 +124,17 @@ def create_mask(pred_mask):
 # Source: https://www.tensorflow.org/tutorials/images/segmentation
 # Author: Tensorflow Authors
 def display_prediction(model, dataset, num=1):
-    for image, mask in dataset.take(num):
+    for num, x in enumerate(dataset.take(num)):
+        image, mask = x
         pred_mask = model.predict(image)
-        display_image_with_mask([image[0], mask[0], create_mask(pred_mask)])
+        display_image_with_mask([image[0], mask[0], create_mask(pred_mask)],
+                                "Image {}".format(num+1))
 
 # Get U-net model based on Keras MobileNet V2
 # Source: https://www.tensorflow.org/tutorials/images/segmentation
 # Author: Tensorflow Authors
 def get_unet_on_mobilnet():
+
     def upsample(filters, size, apply_dropout=False):
       initializer = tf.random_normal_initializer(0., 0.02)
 
@@ -182,11 +151,10 @@ def get_unet_on_mobilnet():
           result.add(tf.keras.layers.Dropout(0.5))
 
       result.add(tf.keras.layers.ReLU())
-
       return result
 
     # Downsampling stack
-    base_model = tf.keras.applications.MobileNetV2(input_shape=[128, 128, 3], include_top=False)
+    base_model = tf.keras.applications.MobileNetV2(input_shape=[IMG_HEIGHT, IMG_WIDTH, 3], include_top=False)
 
     # Use the activations of these layers
     layer_names = [
@@ -215,7 +183,7 @@ def get_unet_on_mobilnet():
       3, 3, strides=2,
       padding='same', activation='softmax')  #64x64 -> 128x128
 
-    inputs = tf.keras.layers.Input(shape=[128, 128, 3])
+    inputs = tf.keras.layers.Input(shape=input_shape)
     x = inputs
 
     # Downsampling through the model
@@ -236,6 +204,7 @@ def get_unet_on_mobilnet():
 # Source: https://www.depends-on-the-definition.com/unet-keras-segmenting-images/
 # Author: Tobias Sterbak
 def get_unet_clean(im_shape, n_filters=16, dropout=0.5, batchnorm=True):
+
     def conv2d_block(input_tensor, n_filters, kernel_size=3, batchnorm=True):
         # first layer
         x = tf.keras.layers.Conv2D(filters=n_filters, kernel_size=(kernel_size, kernel_size), kernel_initializer="he_normal",
@@ -301,21 +270,11 @@ def get_unet_clean(im_shape, n_filters=16, dropout=0.5, batchnorm=True):
     model = tf.keras.models.Model(inputs=[input_img], outputs=[outputs])
     return model
 
-
-# Get given dataset split files
-def get_file_names(split):
-    file_names = [str(f) for f in Path(".\\custom").joinpath(split).glob('*.jpg')]
-
-    image_count = len(file_names)
-    print("Images found: ", image_count)
-
-    return file_names
-
-# Load annotations of given dataset split
+# Load annotations of a dataset split
 def load_annotations(split):
     root = Path(".\\custom").joinpath(split)
-
     file_name = str(root.joinpath("via_region_data.json"))
+
     with open(file_name,'r',encoding="utf8",errors='ignore') as f:
         anno_json = json.load(f)
         f.close()
@@ -326,7 +285,7 @@ def load_annotations(split):
             continue
 
         f = root.joinpath(a['filename'])
-        print('Split {}: adding file {}'.format(split, str(f)))
+        ##print('Split {}: adding file {}'.format(split, str(f)))
         if not f.exists():
             print("Cannot find file", f)
         else:
@@ -341,7 +300,7 @@ def load_annotations(split):
 
     return files, annotations
 
-# Transform file and polygon arrays to tensors of image data and mask
+# Transform file and polygon arrays to image data and mask
 def map_fn(path, polygon):
     # Load the image
     image = tf.image.decode_image(tf.io.read_file(path), channels=3, dtype=tf.float32)
@@ -357,13 +316,17 @@ def map_fn(path, polygon):
     rr, cc = skimage.draw.polygon_perimeter(polygon[1], polygon[0], image.shape)
     mask[rr, cc] = 1
 
-    image = tf.image.resize(image, [128, 128])
-    mask = tf.image.resize(mask, [128, 128])
+    image = tf.image.resize(image, [IMG_HEIGHT, IMG_WIDTH])
+    mask = tf.image.resize(mask, [IMG_HEIGHT, IMG_WIDTH])
 
     return image, mask
 
+# Get dataset split
 def get_dataset(split, show_samples=True):
+    # Load annotations and polygons
     files, areas = load_annotations(split)
+
+    # Convert to image data and mask
     file_t, area_t = [], []
     for n, x in enumerate(zip(files, areas)):
         img, mask = map_fn(x[0], x[1])
@@ -371,33 +334,42 @@ def get_dataset(split, show_samples=True):
             display_image_with_mask([img, mask])
         file_t.extend([img])
         area_t.extend([mask])
+    print("{} files found in split'{}'".format(len(file_t), split))
 
+    # Convert to tensors
     file_t = tf.convert_to_tensor(file_t)
     area_t = tf.convert_to_tensor(area_t)
 
+    # Make a dataset
     dataset = tf.data.Dataset.from_tensor_slices((file_t, area_t))
     dataset = dataset.repeat().shuffle(100, reshuffle_each_iteration=False)
     dataset = dataset.batch(BATCH_SIZE)
 
     return dataset, file_t.shape[0]
 
+# Load data
+print("==> Loading dataset")
 train_dataset, train_count = get_dataset('train', False)
 val_dataset, val_count = get_dataset('val', False)
 
-
 # Build or load the model
-if Path(MODEL_NAME).exists():
-    print("Loading model")
-    model = tf.keras.models.load_model(MODEL_NAME)
+model_dir = ".\\models\\" + MODEL_NAME
+if Path(model_dir).exists():
+    print("==> Loading model", model_dir)
+    model = tf.keras.models.load_model(model_dir)
 else:
-    model = get_unet_clean(im_shape=[128, 128, 3], n_filters=16, dropout=0.05, batchnorm=True)
+    print("==> Bulding model", model_dir)
+    model = get_unet_clean(im_shape=[IMG_HEIGHT, IMG_WIDTH, 3], n_filters=16,
+                           dropout=0.05, batchnorm=True)
+
     model.compile(optimizer='adam',
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
     model.summary()
 
-    tf.keras.utils.plot_model(model, show_shapes=True)
+    #tf.keras.utils.plot_model(model, show_shapes=True)
 
+    print("==> Training model", model_dir)
     callbacks = [
         tf.keras.callbacks.TensorBoard(log_dir="_logs",
                                        histogram_freq=1,
@@ -415,8 +387,11 @@ else:
                               validation_data=val_dataset,
                               callbacks=callbacks)
 
-    model.save(MODEL_NAME)
+    print("==> Saving model", model_dir)
+    model.save(model_dir)
     display_history(model_history)
+
+print("==> Prediction")
 
 # Show predictions for dataset images
 #display_prediction(model, val_dataset.shuffle(100), 5)
@@ -428,7 +403,7 @@ image_paths = sorted(list(images_dir.glob("*.jpg")))
 for image_path in image_paths:
     print(image_path)
     img = tf.image.decode_image(tf.io.read_file(str(image_path)), channels=3, dtype=tf.float32)
-    img = tf.image.resize(img, [128, 128])
+    img = tf.image.resize(img, [IMG_HEIGHT, IMG_WIDTH])
 
     pred_mask = model.predict(img[tf.newaxis, ...])
-    display_image_with_mask([img, None, create_mask(pred_mask)], scale=2)
+    display_image_with_mask([img, None, create_mask(pred_mask)], str(image_path))

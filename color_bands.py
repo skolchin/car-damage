@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 import itertools
 from img_utils import *
+import imageio
 
 IMG_WIDTH = 340
 IMG_HEIGHT = 340
@@ -112,7 +113,10 @@ delay = next(delay_iter)
 
 colors_iter = COLOR_MODES[mode](dir, num_bands)
 
-print("Press q to stop, d to change direction, c to change color mode, +/- to change delay")
+print("Press q to stop, d to change direction, c to change color mode, + to increase delay, " +\
+      "r to start/stop recording to file")
+
+recording = None
 params = None
 
 while(True):
@@ -127,6 +131,8 @@ while(True):
 
     # Show image
     cv2.imshow('Colors', contour_img)
+    if recording is not None:
+        recording.append(deepcopy(contour_img))
 
     # Handle user input
     key = cv2.waitKey(delay) & 0xFF
@@ -144,7 +150,14 @@ while(True):
         mode = next(mode_iter)
         print("Color mode changed to", mode)
         colors_iter = COLOR_MODES[mode](dir, num_bands)
-
+    elif key == ord('r'):
+        if recording is None:
+            recording = []
+            print("Recording started")
+        else:
+            imageio.mimsave('animation.gif', recording)
+            recording = None
+            print("Recording saved to animation.gif")
 
 cv2.destroyAllWindows()
 print("Done")
