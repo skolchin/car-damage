@@ -54,6 +54,32 @@ def color_to_cv_color(name):
     cv_bgr = [c * 255 for c in reversed(mp_rgb)]
     return cv_bgr
 
+def rgba_to_rgb(rgba):
+    """Convert RGBA color to RGB color and mask"""
+    assert rgba.shape[-1] == 4
+
+    rgb = np.empty((rgba.shape[0], rgba.shape[1], 3), dtype=rgba.dtype)
+    r, g, b, m = rgba[:,:,0], rgba[:,:,1], rgba[:,:,2], rgba[:,:,3]
+
+    rgb[:,:,0] = r
+    rgb[:,:,1] = g
+    rgb[:,:,2] = b
+
+    return [rgb, m]
+
+def rgb_to_rgba(rgb, fill=1):
+    """Convert RGB color to RGBA color"""
+    assert rgb.shape[-1] == 3
+
+    rgba = np.full((rgb.shape[0], rgb.shape[1], 4), fill, dtype=rgb.dtype)
+    r, g, b = rgb[:,:,0], rgb[:,:,1], rgb[:,:,2]
+
+    rgba[:,:,0] = r
+    rgba[:,:,1] = g
+    rgba[:,:,2] = b
+
+    return rgba
+
 def ensure_numeric_color(color, gradients=None, max_colors=None):
     """Ensures color is numeric and, if a vector requested, have specified length.
     The function performs the following conversions:
@@ -407,6 +433,44 @@ def get_max_contour_colors(contour, image_shape):
     except IndexError:
         return None
 
+def apply_patch(src, x, y, patch, mask=None, clip=False, alpha=None):
+    """Applies a patch at given x, y (optionally masked)"""
+    if y >= src.shape[0] or x  >= src.shape[1] or y < 0 or x < 0:
+        raise Exception("Invalid coordinates")
+
+    h, w = patch.shape[:2]
+    if (y + h > src.shape[0] or x + w > src.shape[1]) and not clip:
+        raise Exception("Patch is outside image area and clipping not specified")
+    if y + h >= src.shape[0] and clip:
+        h = src.shape[0] - y
+    if x + w >= src.shape[1] and clip:
+        w = src.shape[1] - x
+        patch = patch[0:h, 0:w]
+        mask = mask[0:h, 0:w]
+
+    if patch.shape[-1] == 3 and src.shape[-1] == 4:
+        patch = rgb_to_rgba(patch)
+
+    dst = src.copy()
+    area = dst[y:(y+h), x:(x+w)]
+    if mask is None:
+        if alpha is None:
+            area = patch
+        else:
+            cv2.addWeighted(area, 1 - alpha, patch, alpha, 0, area)
+    else:
+        if alpha is None:
+            area[mask > 0] = patch[mask > 0]
+        else:
+            dtyp = area.dtype
+            a = area[mask > 0] * (1-alpha)
+            p = patch[mask > 0] * alpha
+            area[mask > 0] = a.astype(dtyp) + p.astype(dtyp)
+
+    dst[y:(y+h), x:(x+w)] = area
+    return dst
+
+
 def get_parts(img, meta, apply_clahe=False, apply_filter=False, debug=False):
     """Internal function specific to cars-damage project"""
 
@@ -545,3 +609,14 @@ def get_diff_meta(img, meta,
     return score, patch_diff_img, result_img
 
 
+def increase_brightness(img, value=30):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+
+    lim = 255 - value
+    v[v > lim] = 255
+    v[v <= lim] += np.uint8(value)
+
+    final_hsv = cv2.merge((h, s, v))
+    img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
+    return img
